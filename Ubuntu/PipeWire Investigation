@@ -1,0 +1,246 @@
+# OxideOS Research Report: PipeWire Investigation
+
+**Project:** OxideOS — RedWolf Studios\
+**Research environment:** Ubuntu 26.04.1 LTS VirtualBox VM\
+**Research date:** October 8–9, 2026\
+**Status:** Investigation phase complete for now\
+**Decision:** INVESTIGATE FURTHER — preferred candidate for the OxideOS prototype
+
+---
+
+## 1. Purpose of the Experiment
+
+The purpose of this investigation was to understand how Ubuntu handles audio through PipeWire, how its components work together, what the installed package stack costs in disk space, and whether the system functions correctly in practice.
+
+The goal was not to investigate every available plugin or eliminate every optional package. It was to gather enough evidence to make an informed decision about PipeWire's suitability for OxideOS.
+
+This investigation follows the OxideOS research philosophy:
+
+**Analyze → Learn → Adapt → Evaluate suitability → Incorporate / Adapt / Pass / Investigate Further**
+
+## 2. Environment
+
+The experiment was conducted inside a VirtualBox VM running Ubuntu 26.04.1 LTS (Resolute).
+
+- Kernel: Linux 7.0.0-38-generic
+- PipeWire: 1.6.2-1ubuntu1.2
+- WirePlumber: 0.5.13-1ubuntu1
+- Audio hardware presented to the guest: VirtualBox Intel ICH AC'97 audio device
+- Audio output tested: Wired headphones
+
+The virtual hardware is important to the results. Successful tests demonstrate functionality in this VM, but do not guarantee identical behavior on every physical computer.
+
+## 3. Understanding the Architecture
+
+The investigation established three important roles.
+
+### PipeWire — The Multimedia Engine
+
+PipeWire handles audio streams and provides the underlying multimedia infrastructure. Applications connect to it to play or capture audio.
+
+It also supports broader multimedia uses, including video-related workflows.
+
+### WirePlumber — The Session Manager
+
+WirePlumber manages devices, routes, and policy decisions around PipeWire.
+
+It helps determine which audio devices and endpoints applications use. PipeWire and WirePlumber have different responsibilities, so they should not be treated as interchangeable components.
+
+### PulseAudio Compatibility
+
+Ubuntu provides a PulseAudio-compatible interface through `pipewire-pulse`.
+
+This allows applications that expect the traditional PulseAudio interface to work with PipeWire instead of requiring a separate PulseAudio server.
+
+**Key lesson:** A modern Linux audio system is not necessarily one package. It is a collection of cooperating components, each with a defined responsibility.
+
+## 4. Runtime Investigation
+
+The following services were observed running in the user's session:
+
+- `pipewire.service`
+- `pipewire-pulse.service`
+- `wireplumber.service`
+- `filter-chain.service`
+
+The older `pipewire-media-session` service was absent, and a separate `pulseaudio.service` was not running.
+
+The default audio server identified itself as:
+
+`PulseAudio (on PipeWire 1.6.2)`
+
+This confirmed that applications could use the PulseAudio-compatible interface while PipeWire provided the underlying audio service.
+
+The investigation also examined systemd service and socket configuration. PipeWire's socket can activate its service, while WirePlumber starts in coordination with PipeWire. Service configuration includes several security-hardening directives.
+
+### Device discovery
+
+PipeWire reported an analog stereo playback endpoint and an analog stereo capture endpoint. ALSA also exposed virtual playback and capture hardware supplied by VirtualBox.
+
+These findings confirmed that the audio stack discovered usable endpoint definitions. Device discovery alone, however, does not guarantee that every endpoint receives real audio data.
+
+## 5. Package Investigation
+
+The installed package relationships showed how Ubuntu divides audio functionality across several packages.
+
+| Package                   | Primary role                                |
+| ------------------------- | ------------------------------------------- |
+| `pipewire`                | Main package coordinating core dependencies |
+| `pipewire-bin`            | Server and command-line programs            |
+| `pipewire-pulse`          | PulseAudio-compatible server interface      |
+| `pipewire-alsa`           | ALSA integration                            |
+| `pipewire-audio`          | Audio-related package integration           |
+| `libpipewire-0.3-0t64`    | Core PipeWire shared library                |
+| `libpipewire-0.3-common`  | Shared architecture-independent files       |
+| `libpipewire-0.3-modules` | PipeWire modules                            |
+| `libspa-0.2-modules`      | SPA plugins and supporting modules          |
+| `libspa-0.2-bluetooth`    | Bluetooth audio integration                 |
+| `wireplumber`             | Session management and routing policy       |
+
+The package metadata also illustrated the difference between hard dependencies and recommendations. Dependencies express package requirements; recommendations identify additional packages considered useful by the distribution. Neither category, by itself, tells us whether a package belongs in every OxideOS installation.
+
+### Measured installed footprint
+
+The following values came from `dpkg-query` on the VM.
+
+| Package group                         | Approximate installed size |
+| ------------------------------------- | -------------------------- |
+| PipeWire libraries and modules        | 5.1 MiB                    |
+| SPA modules and Bluetooth plugin      | 5.4 MiB                    |
+| Main programs and integrations        | 2.5 MiB                    |
+| WirePlumber                           | 0.8 MiB                    |
+| **Total for the 11 queried packages** | **13.8 MiB**               |
+
+These figures are rounded estimates based on the package-reported installed sizes.
+
+**Important limitation:** This is not the complete size of the audio system. It excludes dependencies and other related packages, and the reported package sizes do not represent the amount of additional disk space that PipeWire alone requires on a clean installation.
+
+The result nevertheless provides a useful baseline for later comparisons.
+
+## 6. Functional Testing
+
+### Test A: Audio playback
+
+Command:
+
+```
+speaker-test -c 2 -t wav -l 1
+```
+
+**Result: PASS**
+
+The test completed, and the user confirmed that audio played clearly through wired headphones.
+
+The output showed a 48 kHz, 16-bit stereo stream with left and right channels.
+
+This verified a working playback path through the Ubuntu VM's audio stack.
+
+### Test B: Recording endpoint discovery
+
+Command:
+
+```
+arecord -l
+```
+
+**Result: PARTIAL PASS**
+
+ALSA reported two capture endpoints associated with the virtual Intel ICH audio device.
+
+This established that capture endpoints were exposed to the guest. It did not establish that a physical microphone signal was reaching them.
+
+### Test C: Recording through the PulseAudio-compatible interface
+
+Command:
+
+```
+timeout 5s parecord ~/pipewire-test.wav
+```
+
+The command created a WAV file approximately 321 KB in size.
+
+The recording was then played back:
+
+```
+paplay ~/pipewire-test.wav
+```
+
+**Result: INCONCLUSIVE — the recording contained silence.**
+
+A file was created successfully, but its existence did not prove that usable audio had been captured.
+
+Further inspection showed that the default source was the VM's analog stereo input. The source was not muted, its input volume was reported as 100%, and its base volume was approximately 42%. The source was suspended when inspected, which can be normal when no application is actively recording.
+
+The investigation did not establish why the recording was silent. Possible causes include microphone passthrough, virtual hardware behavior, or the selected input path. There is insufficient evidence to attribute the problem to PipeWire itself.
+
+The microphone issue is therefore left unresolved rather than expanded into another troubleshooting project.
+
+## 7. Optional Plugin Investigation
+
+WirePlumber reported that the libcamera SPA plugin could not be loaded and that some camera types might not be supported. It also reported that the BlueZ system service was unavailable.
+
+The package investigation established that `libspa-0.2-libcamera` was not installed. Its metadata showed that it provides the virtual package capability `pipewire-libcamera`.
+
+The absence of these capabilities did not prevent the audio playback test from succeeding.
+
+No optional camera plugin was installed merely to suppress a warning. The VM did not provide evidence that this additional functionality was required for the current audio investigation.
+
+**Research lesson:** A warning about an optional capability should be evaluated against intended functionality. It is not automatically a defect that must be fixed.
+
+## 8. Findings and Implications for OxideOS
+
+### Advantages observed
+
+- PipeWire and WirePlumber provide a clear separation between multimedia processing and session management.
+- PulseAudio compatibility allows existing applications to use the familiar audio interface.
+- Audio playback worked in the test environment.
+- The measured core package footprint was approximately 13.8 MiB, excluding dependencies.
+- Package modularity provides opportunities to distinguish core functionality from optional features.
+- The service configuration includes security-hardening measures.
+
+### Remaining uncertainties
+
+- Recording has not been verified end to end because the test file contained silence.
+- The complete dependency footprint has not been calculated.
+- Bluetooth, camera, and other optional multimedia capabilities have not been functionally tested.
+- The experiment did not compare PipeWire directly against alternative audio systems.
+
+These uncertainties are recorded for future reference; they do not all need to be resolved before prototyping can continue.
+
+## 9. OxideOS Decision Record
+
+**Decision category: INVESTIGATE FURTHER**
+
+**Preliminary recommendation:** Retain PipeWire and WirePlumber as the preferred candidates for the OxideOS prototype.
+
+### Why this decision?
+
+The investigation demonstrated that the services operate, the PulseAudio-compatible interface works, and stereo playback succeeds. The package architecture is understandable, and the measured core package footprint appears reasonable for a modern desktop environment.
+
+However, the investigation has not yet verified recording, assessed the complete dependency footprint, or compared alternative implementations.
+
+### Proposed OxideOS approach
+
+1. Keep PipeWire and WirePlumber on the shortlist for the prototype.
+2. Do not install optional plugins without a defined feature requirement.
+3. Revisit recording only when prototype testing or a real hardware requirement makes it necessary.
+4. Evaluate the audio stack against OxideOS requirements rather than copying Ubuntu's package selection wholesale.
+5. Reassess the decision if practical testing reveals reliability, compatibility, maintenance, or footprint problems.
+
+The goal is not to reproduce Ubuntu exactly. It is to understand what Ubuntu does, identify what works, and adapt the useful parts to OxideOS.
+
+## 10. Conclusion
+
+This investigation has reached a useful stopping point.
+
+We have moved from identifying installed packages to understanding the runtime architecture and verifying actual playback. We have also measured a baseline package footprint and documented the unresolved recording result.
+
+The evidence supports continuing with PipeWire and WirePlumber as leading candidates. It does not yet justify declaring them permanently adopted.
+
+**Final status: Investigation phase complete for now. Preliminary recommendation: INVESTIGATE FURTHER.**
+
+Further testing can take place during prototype development when it has practical value. The next priority is to continue the broader OxideOS research and build process rather than investigate every optional PipeWire component.
+
+---
+
+*Prepared for the OxideOS Research Library — RedWolf Studios.*
