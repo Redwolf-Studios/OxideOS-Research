@@ -1,0 +1,309 @@
+# OxideOS Ubuntu LiveFS Prototype Experiment
+
+## Project
+
+OxideOS - RedWolf Studios
+
+## Prototype
+
+OxideOS-test4.iso
+
+## Date
+
+October 2026
+
+------------------------------------------------------------------------
+
+# Objective
+
+This experiment tested whether Ubuntu could serve as a foundation for an
+early OxideOS prototype.
+
+Goals:
+
+-   Modify an Ubuntu live ISO
+-   Edit the live filesystem
+-   Add LXQt desktop environment
+-   Add SDDM display manager
+-   Create a bootable custom ISO
+-   Verify a graphical desktop session
+
+This was a proof-of-concept build, not the final OxideOS release.
+
+------------------------------------------------------------------------
+
+# Background
+
+Previous Fedora research explored Lorax and livemedia-creator.
+
+The Fedora build successfully produced a live ISO, but the installer
+environment failed due to missing Anaconda runtime dependencies.
+
+The project moved to Ubuntu to investigate a different live image
+workflow.
+
+------------------------------------------------------------------------
+
+# Ubuntu LiveFS Research
+
+Ubuntu uses:
+
+-   Casper live boot system
+-   SquashFS filesystem
+-   initrd boot scripts
+-   live user creation
+-   desktop session configuration
+
+Important discovery:
+
+A live ISO and an installed system are separate layers.
+
+A working live environment does not automatically mean the installer
+will install the modified environment.
+
+------------------------------------------------------------------------
+
+# Tools Used
+
+-   xorriso
+-   squashfs-tools
+-   livefs-editor
+-   Python virtual environment
+-   chroot environments
+
+Source ISO:
+
+    ubuntu-26.04.1-desktop-amd64.iso
+
+------------------------------------------------------------------------
+
+# Build Process
+
+The live filesystem was modified using livefs-editor.
+
+Final build actions:
+
+    setup_rootfs
+
+    Disable cdrom repositories
+
+    apt-get update
+
+    Install:
+        xserver-xorg
+        task-lxqt-desktop
+        sddm
+
+    dpkg --configure -a
+
+    apt-get -f install
+
+Additional issue resolved:
+
+Missing temporary directory:
+
+    /home/redwolf/oxide-ubuntu/tmp
+
+This caused xserver package configuration failures.
+
+------------------------------------------------------------------------
+
+# Successful ISO Build
+
+Output:
+
+    OxideOS-test4.iso
+
+ISO creation completed successfully using xorriso.
+
+------------------------------------------------------------------------
+
+# Boot Testing
+
+Initial boot:
+
+-   GRUB loaded
+-   Live environment started
+-   Black screen occurred
+
+Debugging:
+
+Removed:
+
+    quiet splash
+
+from GRUB parameters to expose boot messages.
+
+------------------------------------------------------------------------
+
+# Boot Discovery
+
+The boot process was not frozen.
+
+Ubuntu was processing:
+
+    snapd.seeded.service
+
+Snap initialization delayed the graphical handoff.
+
+After completion, boot continued.
+
+------------------------------------------------------------------------
+
+# Graphical Success
+
+Reached:
+
+    SDDM Login Screen
+
+TTY investigation:
+
+    Ctrl + Alt + F3
+
+Confirmed live user:
+
+    ubuntu
+
+Verification:
+
+    whoami
+
+returned:
+
+    ubuntu
+
+------------------------------------------------------------------------
+
+# LXQt Verification
+
+Available sessions:
+
+    /usr/share/xsessions/lxqt.desktop
+
+Selected LXQt session.
+
+Desktop successfully launched.
+
+Verification:
+
+    echo $XDG_CURRENT_DESKTOP
+
+Result:
+
+    LXQt
+
+SDDM status:
+
+    systemctl status sddm
+
+Result:
+
+    active (running)
+
+------------------------------------------------------------------------
+
+# Prototype Status
+
+## OxideOS Prototype 0.1
+
+Working:
+
+-   Custom ISO generation
+-   Ubuntu live filesystem modification
+-   LXQt desktop
+-   SDDM display manager
+-   Xorg graphics stack
+-   Live user session
+-   Graphical desktop boot
+
+------------------------------------------------------------------------
+
+# Current Issues
+
+## Branding
+
+Still contains:
+
+-   Ubuntu branding
+-   Debian LXQt theme
+-   Ubuntu session names
+
+Future work:
+
+-   Oxide wallpaper
+-   Oxide theme
+-   Oxide colors
+-   Default application choices
+
+------------------------------------------------------------------------
+
+## Snap Evaluation
+
+Observation:
+
+Snap adds additional initialization and background services.
+
+Future direction:
+
+Evaluate replacing Snap with Flatpak.
+
+Potential model:
+
+    APT
+     |
+     +-- System packages
+
+    Flatpak
+     |
+     +-- Applications
+
+------------------------------------------------------------------------
+
+# Lessons Learned
+
+Linux distributions are layered systems:
+
+    Kernel
+     |
+    Boot system
+     |
+    Filesystem
+     |
+    Packages
+     |
+    Display server
+     |
+    Desktop environment
+     |
+    User session
+     |
+    Installer
+
+Each layer has independent requirements.
+
+------------------------------------------------------------------------
+
+# Next Phase
+
+OxideOS customization:
+
+-   Remove Ubuntu branding
+-   Replace Debian LXQt theme
+-   Create Oxide identity
+-   Add Flatpak integration
+-   Evaluate Snap removal
+-   Automate build process
+-   Create versioning system
+
+------------------------------------------------------------------------
+
+# Final Conclusion
+
+The Ubuntu prototype experiment was successful.
+
+OxideOS moved from a research concept into a bootable graphical Linux
+prototype.
+
+The next challenge is no longer proving feasibility.
+
+The next challenge is making it uniquely Oxide.
