@@ -1,0 +1,70 @@
+ADR 0001: Evaluate Lubuntu 26.04.1 LTS with livefs-editor
+Status: Proposed — awaiting validation
+Date: 2026-10-16
+Decision owners: OxideOS project
+Context
+OxideOS needs a maintainable, repeatable way to build an Ubuntu-family live ISO that boots into LXQt, installs successfully, and boots into LXQt after installation. The current priority is to prove this baseline before adding custom branding, application bundles, recovery features, or other distribution-level changes.
+
+Earlier experiments showed why the live and installed environments must be tested separately:
+
+A customized Ubuntu Desktop image reached an LXQt live session, but the installed system did not appear to retain the intended LXQt setup. The exact installer behavior responsible has not been established.
+A separate Cubic-generated image failed during live boot with a root-filesystem mount error. Its root cause also remains unknown.
+These are distinct observations, not evidence of one confirmed underlying cause. They do not prove that GNOME conflicts with LXQt, that Cubic is generally broken, or that changing the source image will solve the installer problem.
+
+Decision
+Use Lubuntu 26.04.1 LTS as the next experimental source ISO and continue evaluating Ubuntu livefs-editor as the preferred candidate for defining a version-controlled build recipe.
+
+This is a decision about the next experiment, not approval of a production build system. The combination remains unvalidated for OxideOS until the acceptance criteria below pass.
+
+Rationale
+Lubuntu already provides LXQt, removing the separate task of replacing Ubuntu Desktop's default GNOME environment from this experiment.
+A closer-to-target starting point helps isolate image-building and installer behavior from desktop-replacement changes.
+livefs-editor supports YAML action recipes, which can be tracked in version control and rerun more consistently than a primarily interactive workflow.
+Testing one source ISO at a time respects limited disk space and keeps the experiment focused.
+An LTS flavor is a more appropriate starting point for the initial stability-oriented prototype than an interim release. OxideOS must still define and maintain its own support policy; upstream flavor support dates must be checked and respected.
+Alternatives considered
+Continue with Ubuntu Desktop as the source
+This remains a useful comparison point, but it adds desktop-replacement work before the live/installed image behavior is understood. Preserve the existing findings rather than keeping multiple large source images and build trees active at once.
+
+Use Cubic as the primary build method
+Cubic's graphical workflow is useful for learning and manual experiments. For the long-term goal, a declarative recipe is a better fit for review, version control, and repeatable builds. The previous Cubic failure is not, by itself, proof that Cubic caused the problem or cannot be used successfully.
+
+Treat livefs-editor as already validated
+Rejected. The tool's documentation describes desktop-installer support as less thoroughly investigated than server-image support. Compatibility with the selected Lubuntu desktop image must be demonstrated, not assumed.
+
+Validation and acceptance criteria
+The baseline is not validated until all of the following are complete:
+
+Source integrity: Download Lubuntu 26.04.1 LTS from an official source and verify its published checksum and integrity instructions. Record the exact filename, release, checksum, and tool version used.
+Image inspection: Identify the relevant SquashFS layers, boot files, installer components, and desktop/package configuration before changing them.
+Recipe-controlled build: Save the build recipe in version control. Make minimal, documented changes and record the command, tool version, logs, output size, and checksum.
+Live boot: Boot the generated ISO in a virtual machine, confirm the root filesystem mounts, and reach the LXQt live desktop.
+Installation: Install to a fresh virtual disk and record the installer path and choices.
+Installed first boot: Confirm the installed system boots into LXQt, the expected LXQt packages are registered with dpkg, and the session/display manager are available and configured. Check basic networking and reboot/shutdown behavior.
+Repeatability: Rebuild from the same saved recipe and compare results. Document any expected or unexplained differences; do not claim byte-for-byte reproducibility unless demonstrated.
+An ISO that merely builds, or a live session that works without a successful installed first boot, does not pass.
+
+Consequences
+Expected benefits
+
+Less initial work changing desktop environments.
+A more reviewable starting point for an automated and reproducible build process.
+Clear separation between image construction, live boot, installation, and installed first boot.
+Risks and obligations
+
+livefs-editor may not support every aspect of the Lubuntu desktop installer workflow.
+A successful live customization may still not determine what the installer deploys.
+The team must keep logs and change one variable at a time when failures occur.
+Before redistribution, review package and asset licenses, Ubuntu/Lubuntu branding rules, and trademark policy. Use OxideOS's own branding and do not imply upstream endorsement.
+OxideOS's own support commitment must not exceed what the project can maintain, regardless of the base release's lifecycle.
+Review trigger
+Update this ADR when the Lubuntu/livefs-editor baseline passes all acceptance criteria, or when evidence shows that the source ISO or build method should change. Until then, keep the status as Proposed — awaiting validation.
+
+References
+Canonical, Creating installer images: https://documentation.ubuntu.com/hardware-support/image-cookbook/howto/images/create_installer_image/
+Ubuntu livefs-editor source and documentation: https://github.com/ubuntu/livefs-editor
+Lubuntu downloads and release information: https://lubuntu.me/downloads/
+Ubuntu release cycle: https://ubuntu.com/about/release-cycle
+Cubic issue #225, an older server-image report about package registration after customization (a possible failure mode, not proof of OxideOS's cause): https://github.com/PJ-Singh-001/Cubic/issues/225
+Cubic issue #295, an older server-image report about packages added through Cubic not appearing as expected (not proof of OxideOS's cause): https://github.com/PJ-Singh-001/Cubic/issues/295
+Canonical intellectual property and trademark policy: https://ubuntu.com/legal/intellectual-property-policy
