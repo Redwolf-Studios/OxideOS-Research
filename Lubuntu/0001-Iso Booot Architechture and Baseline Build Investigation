@@ -1,0 +1,734 @@
+# OxideOS Research Paper
+## Lubuntu 26.04.1 LTS — ISO Boot Architecture and Baseline Build Investigation
+
+**Project:** OxideOS  
+**Organization:** RedWolf Studios  
+**Research Status:** In Progress  
+**Research Focus:** Live ISO architecture, initramfs, Casper, SquashFS layers, and installer preservation  
+**Base Distribution:** Lubuntu 26.04.1 LTS (Resolute)  
+**Build Environment:** Ubuntu 26.04.1 LTS VirtualBox VM
+
+---
+
+# 1. Executive Summary
+
+OxideOS is currently being developed as a Lubuntu-based Linux distribution, with the initial objective of establishing a reliable, repeatable ISO build process.
+
+Before modifying the distribution, the project has entered a research phase focused on understanding how the original Lubuntu desktop ISO operates.
+
+The investigation has concentrated on the ISO's boot architecture, specifically:
+
+- GRUB boot configuration.
+- Linux kernel and initramfs loading.
+- Casper live boot scripts.
+- SquashFS filesystem organization.
+- Layer selection and dependency relationships.
+- OverlayFS filesystem assembly.
+- Calamares installer integration.
+- The handoff from the initramfs to the live operating system.
+
+The investigation has uncovered that Lubuntu 26.04.1 uses a multi-layer SquashFS architecture. Casper identifies the required filesystem layers, mounts them read-only, and combines them using OverlayFS to produce the live operating environment.
+
+This is an important discovery for OxideOS because modifications to the ISO must preserve the relationship between these filesystem layers and the boot scripts responsible for assembling them.
+
+**Current position:** The original ISO has been inspected and its live filesystem assembly process has been partially traced. No customized OxideOS ISO has been built yet.
+
+---
+
+# 2. Project Objective and Build Philosophy
+
+The current OxideOS milestone is deliberately limited.
+
+The objective is to produce a baseline ISO that:
+
+1. Boots successfully.
+2. Loads the LXQt live desktop.
+3. Provides a functioning graphical installer.
+4. Completes installation onto a virtual or physical disk.
+5. Boots successfully from the installed system.
+6. Can be rebuilt using documented, repeatable steps.
+
+No additional customization is permitted until this baseline has been demonstrated.
+
+### Development principles
+
+The project follows this sequence:
+
+1. Make it work.
+2. Understand why it works.
+3. Make the build repeatable.
+4. Then improve it.
+
+This approach is intended to prevent unnecessary complexity and avoid introducing multiple variables during early development.
+
+The project will not switch distributions or build tools without an evidenced technical reason.
+
+---
+
+# 3. Build Environment
+
+The current development environment is an Ubuntu 26.04.1 LTS virtual machine running inside VirtualBox.
+
+### Workspace structure
+
+```text
+~/OxideOS/
+├── build/
+├── logs/
+├── notes/
+├── output/
+├── recipes/
+└── source/
+    └── iso/
+```
+
+### Source ISO
+
+```text
+lubuntu-26.04.1-desktop-amd64.iso
+```
+
+The original ISO was downloaded and copied into the project source directory.
+
+Its SHA-256 checksum was verified against the expected official checksum:
+
+```text
+a8038585420f2270845549c6f493e0ec98e68d4b2c49571cbe500a4b5fab3062
+```
+
+The original download remains preserved separately.
+
+### Installed inspection utilities
+
+The following utilities are available:
+
+- xorriso
+- unsquashfs
+- mksquashfs
+- gzip
+- xz
+- cpio
+- unmkinitramfs
+
+The `initramfs-tools-core` package was installed to provide `unmkinitramfs`.
+
+Its installation also installed the following dependencies:
+
+- busybox-initramfs
+- initramfs-tools-bin
+- klibc-utils
+- libklibc
+
+The installation triggered regeneration of the VM's own initrd:
+
+```text
+/boot/initrd.img-7.0.0-38-generic
+```
+
+This was a host-system package operation, separate from the extracted Lubuntu ISO.
+
+---
+
+# 4. ISO Boot Architecture Investigation
+
+## 4.1 Bootloader inspection
+
+The original ISO was inspected using xorriso.
+
+The ISO contains:
+
+- BIOS GRUB boot support.
+- An EFI boot image.
+- MBR protective partition information.
+- GPT boot information.
+
+The ISO volume identifier is:
+
+```text
+Lubuntu 26.04.1 LTS amd64
+```
+
+The GRUB configuration was extracted to:
+
+```text
+~/OxideOS/build/grub.cfg
+```
+
+The primary boot entry is:
+
+```text
+menuentry "Try or Install Lubuntu" {
+    set gfxpayload=keep
+    linux  /casper/vmlinuz  --- quiet splash
+    initrd /casper/initrd
+}
+```
+
+Additional entries include safe graphics and OEM installation.
+
+The primary entry does not explicitly specify a SquashFS filename or a `layerfs-path` argument.
+
+This becomes important because the initramfs supplies a default filesystem layer independently of the GRUB configuration.
+
+## 4.2 ISO filesystem contents
+
+The following files were identified inside `/casper`:
+
+| File | Approximate size |
+|---|---:|
+| `vmlinuz` | 16.5 MiB |
+| `initrd` | 94 MiB |
+| `minimal.squashfs` | 1.90 GiB |
+| `minimal.standard.squashfs` | 1.58 GiB |
+| `minimal.standard.live.squashfs` | 27.2 MiB |
+
+All three SquashFS images were extracted into the build directory.
+
+Their filesystem metadata indicates:
+
+- SquashFS version 4.0.
+- XZ compression.
+- 131072-byte block size.
+- Compressed metadata and data.
+- Duplicate file removal enabled.
+
+These are the three filesystem images currently known to participate in Lubuntu's live environment.
+
+---
+
+# 5. SquashFS Layer Investigation
+
+## 5.1 Main filesystem layer
+
+The first image is:
+
+```text
+minimal.squashfs
+```
+
+It contains the bulk of the operating system filesystem.
+
+Inspection revealed standard Linux filesystem directories, including:
+
+- `/bin`
+- `/boot`
+- `/dev`
+- `/etc`
+- `/usr`
+
+The extracted filesystem includes kernel files for version `7.0.0-30-generic`.
+
+This differs from the running development VM's kernel version. That is expected because the ISO contains its own live operating system.
+
+## 5.2 Standard filesystem layer
+
+The second image is:
+
+```text
+minimal.standard.squashfs
+```
+
+Its inspected contents include additional system configuration and application-related files.
+
+Examples include:
+
+- AppArmor configuration.
+- APT configuration.
+- Alternatives configuration.
+
+Its package manifest did not list the Calamares packages found in the live-specific layer.
+
+## 5.3 Live filesystem layer
+
+The third image is:
+
+```text
+minimal.standard.live.squashfs
+```
+
+This image is approximately 27.2 MiB.
+
+Its inspected contents include:
+
+```text
+/etc/calamares/branding/lubuntu/
+```
+
+It also contains:
+
+- `branding.desc`
+- Calamares module configuration files.
+- Lubuntu-specific installer branding assets.
+
+Its package manifest includes:
+
+```text
+calamares
+calamares-data
+calamares-settings-lubuntu
+calamares-settings-ubuntu-common
+calamares-settings-ubuntu-common-data
+casper
+libcalamares3.3
+libcalamaresui3.3
+```
+
+The Calamares package version recorded in the manifest is:
+
+```text
+3.3.14-0ubuntu25
+```
+
+This establishes that the live-specific layer contains Calamares packages and installer configuration.
+
+It does not, by itself, establish that every installer dependency resides exclusively in this image. The final assembled filesystem must be considered when determining actual runtime availability.
+
+---
+
+# 6. Initramfs Investigation
+
+The original initramfs was extracted from the ISO:
+
+```text
+/casper/initrd
+```
+
+The extracted copy is stored at:
+
+```text
+~/OxideOS/build/initrd
+```
+
+Its file size is:
+
+```text
+98,539,412 bytes
+```
+
+Initial inspection identified an SVR4 CPIO archive at the beginning of the file.
+
+The first archive listing contained:
+
+```text
+kernel/
+kernel/x86/
+kernel/x86/microcode/
+kernel/x86/microcode/AuthenticAMD.bin
+```
+
+The archive listing only exposed the early microcode component, not the complete initramfs.
+
+The image was subsequently unpacked using:
+
+```bash
+unmkinitramfs ~/OxideOS/build/initrd \
+  ~/OxideOS/build/initrd-inspect
+```
+
+This successfully exposed the main initramfs filesystem and its boot scripts.
+
+The extracted inspection directory is:
+
+```text
+~/OxideOS/build/initrd-inspect/
+```
+
+This gave us access to the actual Casper scripts and configuration files.
+
+---
+
+# 7. Casper Boot Investigation
+
+Casper is responsible for locating and assembling the live filesystem during boot.
+
+The investigation has identified several important components.
+
+## 7.1 Default layer selection
+
+The extracted configuration file is:
+
+```text
+conf/conf.d/default-layer.conf
+```
+
+Its contents are:
+
+```bash
+LAYERFS_PATH=minimal.standard.live.squashfs
+```
+
+This establishes the default selected layer.
+
+## 7.2 Kernel command-line override
+
+The Casper script contains:
+
+```bash
+layerfs-path=*)
+    export LAYERFS_PATH="${x#layerfs-path=}"
+```
+
+This allows the selected layer to be overridden through a kernel command-line argument.
+
+The extracted GRUB configuration does not specify this argument, so the default configuration applies to the normal boot entry.
+
+## 7.3 Layer dependency discovery
+
+Casper derives the parent layer names by repeatedly removing the final dotted component from the selected filename.
+
+Starting with:
+
+```text
+minimal.standard.live.squashfs
+```
+
+It derives:
+
+```text
+minimal.standard.squashfs
+minimal.squashfs
+```
+
+The script checks that the required images exist before continuing.
+
+The resulting layer chain is:
+
+```text
+minimal.squashfs
+        |
+        v
+minimal.standard.squashfs
+        |
+        v
+minimal.standard.live.squashfs
+```
+
+This is a chained filesystem layout, not three unrelated images.
+
+## 7.4 Read-only mounting
+
+Casper obtains a backing device for each image, identifies its filesystem type, and mounts it read-only.
+
+The script uses:
+
+```bash
+mount -t "${fstype}" -o ro,noatime \
+  "${backdev}" "${croot}${imagename}"
+```
+
+The individual layer mount points are collected into the variables:
+
+```text
+rofsstring
+rofslist
+```
+
+These variables are subsequently used during filesystem assembly.
+
+---
+
+# 8. OverlayFS Assembly
+
+One of the most important discoveries is how Casper combines the filesystem layers.
+
+The extracted Casper script contains:
+
+```bash
+mount -t overlay \
+  -o "upperdir=/cow/upper,lowerdir=$mounts,workdir=/cow/work" \
+  "/cow" "$rootmnt" || panic "overlay mount failed"
+```
+
+This confirms that Lubuntu uses Linux OverlayFS to assemble the live environment.
+
+### Components
+
+| Component | Purpose |
+|---|---|
+| Lower directories | Provide the read-only filesystem layers |
+| Upper directory | Stores writable changes |
+| Work directory | Supports OverlayFS operations |
+| Root mount | Receives the assembled live filesystem |
+
+The SquashFS layers remain read-only.
+
+The writable upper directory allows the live environment to operate as a normal working system without modifying the original SquashFS images.
+
+This is a critical dependency for the ISO.
+
+Any modifications to the layer names, layer files, or boot configuration must preserve the relationships expected by Casper.
+
+---
+
+# 9. Installation Media Discovery
+
+The following script was inspected:
+
+```text
+scripts/casper-premount/20iso_scan
+```
+
+It checks the kernel command line for:
+
+```text
+iso-scan/filename=
+```
+
+If specified, Casper searches for the ISO and records its location in:
+
+```text
+/conf/param.conf
+```
+
+The script can also record an ISO offset when the ISO is found as a file.
+
+The normal GRUB entry does not explicitly provide this argument.
+
+Separately, Casper's `mountroot()` function searches local devices for the live filesystem. The relevant function is:
+
+```text
+find_livefs()
+```
+
+This process checks for a specified live medium first and can subsequently scan available devices.
+
+The boot process therefore has mechanisms for locating the live installation media rather than relying exclusively on a fixed device path.
+
+---
+
+# 10. Live Boot Configuration and Installer Preparation
+
+The Casper `mountroot()` function begins at line 901 in the extracted script.
+
+Its inspected sequence includes:
+
+1. Redirecting output to `casper.log`.
+2. Parsing the kernel command line.
+3. Configuring networking when required.
+4. Running Casper premount scripts.
+5. Locating the live filesystem.
+6. Mounting and assembling the filesystem layers.
+7. Setting up optional log persistence.
+8. Applying hostname and username configuration.
+9. Preparing the debconf communication mechanism.
+10. Running Casper-bottom scripts.
+11. Copying logs and configuration into the assembled live filesystem.
+
+The Casper-bottom script order includes:
+
+```text
+05mountpoints
+12fstab
+13swap
+14locales
+15autologin
+18hostname
+19keyboard
+20xconfig
+22desktop_settings
+...
+99casperboot
+```
+
+The final script:
+
+```text
+scripts/casper-bottom/99casperboot
+```
+
+contains:
+
+```bash
+touch /run/.casper-boot
+```
+
+This provides a marker indicating that the Casper live boot process has reached that stage.
+
+The investigation also located the initramfs `/init` references to:
+
+```text
+mountroot
+run-init
+```
+
+The relevant references are:
+
+```text
+/init:292
+/init:295
+/init:331
+/init:389
+```
+
+This establishes where the handoff process is located, but the surrounding `/init` code has not yet been inspected in full.
+
+**Remaining question:** exactly how `/init` prepares the new root and invokes `run-init` to transfer control to the live operating system.
+
+---
+
+# 11. Current Technical Findings
+
+The following table separates confirmed findings from outstanding questions.
+
+| Area | Status | Finding |
+|---|---|---|
+| ISO boot structure | Confirmed | BIOS and EFI boot support identified |
+| GRUB configuration | Confirmed | Primary entry loads kernel and initrd |
+| SquashFS images | Confirmed | Three filesystem layers extracted |
+| Calamares packages | Confirmed | Present in live-layer manifest |
+| Calamares configuration | Confirmed | Lubuntu-specific files found in live layer |
+| Initramfs extraction | Confirmed | Successfully unpacked |
+| Default layer selection | Confirmed | `minimal.standard.live.squashfs` |
+| Layer dependency chain | Confirmed | Parent layers derived from filename |
+| SquashFS mounting | Confirmed | Layers mounted read-only |
+| OverlayFS assembly | Confirmed | Upper, lower, and work directories identified |
+| Live media discovery | Confirmed | Casper scans for the live filesystem |
+| Casper-bottom processing | Confirmed | Script order inspected |
+| Final root handoff | Partially investigated | `run-init` references located |
+| Live installer runtime dependencies | Not fully established | Requires examination of assembled filesystem |
+| livefs-editor compatibility | Not tested | Desktop ISO compatibility remains an open question |
+| OxideOS baseline build | Not started | No customized ISO produced |
+
+---
+
+# 12. Implications for OxideOS Development
+
+The investigation has identified several architectural requirements.
+
+## 12.1 Preserve the original boot architecture
+
+The initial OxideOS build should preserve:
+
+- The original GRUB configuration and boot entries.
+- The original kernel and initramfs.
+- The SquashFS layer filenames.
+- The SquashFS dependency chain.
+- Casper configuration and scripts.
+- OverlayFS functionality.
+- Calamares packages and configuration.
+
+Changing any of these before establishing a successful baseline introduces unnecessary risk.
+
+## 12.2 Installer dependencies must be considered across all layers
+
+The live-specific layer contains Calamares packages and configuration.
+
+However, the complete installer runtime depends on the assembled filesystem.
+
+We must not assume that the small live layer independently contains everything required by the installer.
+
+The installed system and live environment must also be treated as separate execution environments.
+
+## 12.3 Build tooling must preserve ISO bootability
+
+The next build-tool investigation concerns `livefs-editor`.
+
+The project must determine whether it can correctly process this exact Lubuntu desktop ISO.
+
+The upstream tool's primary focus is Ubuntu Server installer media. Desktop ISO compatibility has not been sufficiently established for our use case.
+
+This is a technical uncertainty, not yet an evidenced blocker.
+
+No tool switch should be made until testing provides a reason.
+
+---
+
+# 13. Next Research Tasks
+
+The next session should resume with the following work.
+
+### Task 1 — Finish initramfs handoff investigation
+
+Inspect:
+
+```bash
+sed -n '270,400p' \
+  ~/OxideOS/build/initrd-inspect/init
+```
+
+Determine:
+
+- How `mountroot` is invoked.
+- How the new root is prepared.
+- How `run-init` receives the assembled root.
+- Which init process is launched.
+
+### Task 2 — Record the boot architecture
+
+Create a technical note documenting:
+
+- GRUB.
+- Kernel and initramfs.
+- Casper.
+- Layer selection.
+- SquashFS mounting.
+- OverlayFS assembly.
+- Live root handoff.
+- Calamares availability.
+
+### Task 3 — Investigate livefs-editor compatibility
+
+Determine:
+
+- How the tool identifies and processes ISO contents.
+- Whether it supports the Lubuntu desktop ISO layout.
+- Whether it preserves BIOS and EFI boot functionality.
+- Whether it can modify the relevant filesystem layers safely.
+- Whether a modified ISO can still boot and launch Calamares.
+
+Do not commit to the tool until compatibility is demonstrated.
+
+### Task 4 — Establish the baseline build
+
+Once the build method is understood, produce an initial OxideOS ISO with minimal or no custom changes.
+
+Test it in VirtualBox.
+
+The baseline must pass all six requirements defined in Section 2.
+
+---
+
+# 14. Current Build Restrictions
+
+Until the baseline is proven, the following activities remain outside the active milestone:
+
+- Removing Snap packages.
+- Stripping default applications.
+- Changing the desktop environment.
+- Adding Oxide branding.
+- Adding the Oxide creative suite.
+- Adding custom developer tooling.
+- Replacing system components.
+- Modifying the original boot architecture without evidence that it is necessary.
+
+These are future development tasks, not current build requirements.
+
+New ideas should be documented under a Later or Investigate category rather than interrupting the current build.
+
+---
+
+# 15. Conclusion
+
+The OxideOS project has progressed from examining the Lubuntu ISO as a packaged distribution to understanding significant portions of its underlying live boot architecture.
+
+The most important discovery is the chained SquashFS and OverlayFS design.
+
+Lubuntu does not simply boot a single compressed filesystem. Its initramfs uses Casper to locate the installation media, select the appropriate filesystem layers, mount those layers read-only, and combine them into a writable live environment.
+
+The investigation has also confirmed that the live-specific layer contains Calamares packages and Lubuntu-specific installer configuration.
+
+These findings provide a technical foundation for the next stage of OxideOS development.
+
+However, the investigation is not complete. The final initramfs handoff still needs to be examined, and the compatibility of `livefs-editor` with the Lubuntu desktop ISO must be tested.
+
+The project should continue to prioritize understanding and preserving the existing boot architecture before introducing customizations.
+
+**The next milestone is not a prettier ISO or a smaller ISO. It is a working, installable, repeatable OxideOS baseline.**
+
+---
+
+**RedWolf Studios — OxideOS Development Research**
+
+*Research status: In progress*
+
+*Document purpose: Technical handoff, build reference, and development decision support.*
