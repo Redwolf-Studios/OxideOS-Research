@@ -1,0 +1,34 @@
+## Current Development Direction
+
+**OxideOS is currently being developed using Lubuntu 26.04.1 LTS as its provisional base.**
+
+Following earlier experiments with Fedora and Ubuntu-based build approaches, development has shifted toward a Lubuntu-based prototype using the `livefs-editor` tool as the proposed ISO modification method.
+
+This direction is currently under investigation. Compatibility with the Lubuntu desktop ISO has not yet been fully established.
+
+### Current Priorities
+
+The immediate objective is to establish a reliable, repeatable baseline ISO capable of:
+
+- Booting successfully into the LXQt live desktop.
+- Launching the graphical installer.
+- Completing installation successfully.
+- Booting into the installed operating system.
+- Being rebuilt through documented and repeatable procedures.
+
+### Development Status
+
+The project is currently in the research and build-tool validation stage.
+
+Work is focused on understanding Lubuntu's ISO architecture, including its GRUB configuration, initramfs, Casper boot process, layered SquashFS filesystem, OverlayFS assembly, and Calamares installer integration.
+
+No major customizations will be introduced until the baseline build is working.
+
+### Development Philosophy
+
+1. Make it work.
+2. Understand why it works.
+3. Make the build repeatable.
+4. Then improve it.
+
+**Note:** The choice of Lubuntu is the current development direction, not an irreversible long-term distribution decision. Future changes will be based on technical findings and documented project decisions.
